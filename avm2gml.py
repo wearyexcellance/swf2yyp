@@ -778,6 +778,13 @@ def attach_as3(results, class_objects, doc_class, log=print, sound_names=None):
  
     for item in results:
         cls, events = item["class"], item["events"]
+        if isinstance(events, dict):
+            event_map = events
+        else:
+            event_map = {
+                ev.get("event"): ev.get("gml", "")
+                for ev in events if isinstance(ev, dict)
+            }
         if not any(_has_code(code) for code in event_map.values()) \
                 and cls not in class_objects and cls != doc_class:
             continue                                    # empty class / interface
