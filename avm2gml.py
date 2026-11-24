@@ -434,6 +434,47 @@ def _has_code(gml):
     return any(l.strip() and not l.strip().startswith("//") for l in (gml or "").splitlines())
  
  
+def _gm_event_key(event_name):
+    """Translate standard and numbered GameMaker event names to gmlib keys."""
+    if isinstance(event_name, tuple):
+        return event_name
+    name = str(event_name or "").strip()
+    low = name.lower().replace(" ", "_")
+    fixed = {
+        "beginstep": "begin_step", "endstep": "end_step",
+        "cleanup": "clean_up", "drawgui": "draw_gui",
+        "drawbegin": "draw_begin", "drawend": "draw_end",
+        "drawguibegin": "draw_gui_begin", "drawguiend": "draw_gui_end",
+        "predraw": "pre_draw", "postdraw": "post_draw",
+        "gamestart": "game_start", "gameend": "game_end",
+        "roomstart": "room_start", "roomend": "room_end",
+        "animationend": "animation_end",
+    }
+    low = fixed.get(low.replace("_", ""), low)
+    if low in gm.EVENTS:
+        return gm.EVENTS[low]
+
+    numbered_types = {
+        "alarm": 2, "step": 3, "keyboard": 5, "mouse": 6,
+        "other": 7, "draw": 8, "keypress": 9, "keyrelease": 10,
+    }
+    match = re.fullmatch(
+        r"(Alarm|Step|Keyboard|Mouse|Other|Draw|KeyPress|KeyRelease)_?(\d+)",
+        name, re.IGNORECASE)
+    if match:
+        return (numbered_types[match.group(1).lower()], int(match.group(2)))
+
+    if low.startswith("collision:"):
+        other = name.split(":", 1)[1].strip()
+        if other:
+            return (4, other)
+    if low.startswith("collision_"):
+        other = name[len("Collision_"):].strip()
+        if other:
+            return (4, other)
+    return gm._event_key(low)
+
+
 def export_as3(swf, export_dir, java, ffdec_jar, log=print):
     """Let FFDec write every AS3 class as .as files; returns the folder holding them."""
     log("  Exporting ActionScript with FFDec...")
@@ -737,7 +778,7 @@ def attach_as3(results, class_objects, doc_class, log=print, sound_names=None):
  
     for item in results:
         cls, events = item["class"], item["events"]
-        if not any(_has_code(events.get(k)) for k in ("Create", "Step", "Draw")) \
+        if not any(_has_code(code) for code in event_map.values()) \
                 and cls not in class_objects and cls != doc_class:
             continue                                    # empty class / interface
  
@@ -751,11 +792,17 @@ def attach_as3(results, class_objects, doc_class, log=print, sound_names=None):
             doc_object = obj
  
         written = []
-        for event_key, gm_event in (("Create", "create"), ("Step", "step"), ("Draw", "draw")):
-            code = _fix_sound_refs(events.get(event_key, ""), sound_names)
-            if _has_code(code):
-                gm.gm_add_event(obj, gm_event, code)    # appends to spawn code in Create
-                written.append(event_key)
+        for event_name, original_code in event_map.items():
+            code = _fix_sound_refs(original_code or "", sound_names)
+            if not _has_code(code):
+                continue
+            try:
+                gm_event = _gm_event_key(event_name)
+                # Create appends to any SWF child-spawn code already installed.
+                gm.gm_add_event(obj, gm_event, code, append=True)
+                written.append(str(event_name))
+            except (ValueError, TypeError) as exc:
+                log(f"  ! {cls}: unsupported GameMaker event {event_name!r} ({exc})")
         log(f"  {cls} -> {obj}: {', '.join(written) or 'no code'}")
     return doc_object
  
