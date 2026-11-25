@@ -585,7 +585,21 @@ def transpile_as2(as2_dir, object_names, log=print):
                 with open(path, encoding="utf-8-sig", errors="replace") as fh:
                     source = fh.read()
 
-                res = _a1g.as2_to_gml(
+                # Resolve the public converter API with a compatibility fallback.
+                # Some installed copies expose the core entry point as transpile().
+                _as2_convert = (
+                    getattr(_a1g, "as2_to_gml", None)
+                    or getattr(_a1g, "transpile", None)
+                )
+                if _as2_convert is None:
+                    loaded_from = getattr(_a1g, "__file__", "<unknown path>")
+                    raise ImportError(
+                        "Imported AS2 module has neither as2_to_gml() nor transpile(); "
+                        f"loaded from {loaded_from}. Check for a conflicting "
+                        "as2_to_gml.py or a circular import."
+                    )
+
+                res = _as2_convert(
                     source,
                     name_hint=stem,
                     object_names=object_names
